@@ -1,0 +1,5 @@
+ultralytics
+Flask
+Pillow
+gunicorn
+boto3
