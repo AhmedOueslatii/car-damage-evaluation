@@ -1,34 +1,34 @@
 name: Déploiement Continu vers Fargate (ECS/CloudFormation)
 
-# Déclenche le workflow à chaque push sur la branche 'main'
 on:
   push:
     branches:
       - main
-  # Permet de lancer le workflow manuellement depuis l'interface GitHub
   workflow_dispatch:
 
-# Définition des variables spécifiques à votre environnement
 env:
+  # Configuration AWS et Région (eu-central-1)
   AWS_REGION: eu-central-1
   ECR_REPOSITORY: car-damage-inference-repo
-  AWS_ACCOUNT_ID: 837520753042
-  ECR_URI: 837520753042.dkr.ecr.eu-central-1.amazonaws.com/car-damage-inference-repo
-  CFN_STACK_NAME: CarDamageInferenceStack
-  CFN_TEMPLATE: car-damage-inference-stack.yaml
-  # Paramètres pour la mise à jour de la stack
+  STACK_NAME: CarDamageInferenceStack
+
+  # Paramètres CloudFormation (vérifiés précédemment)
   VPC_ID: vpc-095f1ea82ca7a98f7
   SUBNET_1: subnet-0c1ea539005746ae3
   SUBNET_2: subnet-0021824dd966cb43f
+  
+  # Contexte de construction Docker: '.' signifie que le Dockerfile est à la racine
+  DOCKERFILE_CONTEXT: .
 
 jobs:
   deploy:
+    name: Déploiement
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout du Code
+      - name: Set up job
         uses: actions/checkout@v4
 
-      # --- Étape 1: Configuration de l'environnement AWS ---
       - name: Configuration des Identifiants AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -36,35 +36,43 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # --- Étape 2: Build & Push l'image Docker vers ECR ---
       - name: Login à Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build et Tag de l'image Docker
+        id: build-image
         env:
+          # FIX: Assurez-vous que l'URL du registre est définie correctement
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }} # Utilise le hash de commit comme tag unique
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          echo "Building image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          # Utilisation du contexte '.' qui assume le Dockerfile est à la racine
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
-      - name: Push de l'image vers ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest # Pousse aussi le tag 'latest'
 
-      # --- Étape 3: Mise à jour de la Stack CloudFormation (Déploiement) ---
+      - name: Push de l'image vers ECR
+        id: push-image
+        env:
+          # FIX: Assurez-vous que l'URL du registre est définie correctement
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Pushing image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
       - name: Déploiement de la mise à jour de la Stack CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
-          name: ${{ env.CFN_STACK_NAME }}
-          template: ${{ env.CFN_TEMPLATE }}
+          name: ${{ env.STACK_NAME }}
+          template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
-          parameters: >
-            VPCID=${{ env.VPC_ID }}
-            PublicSubnet1=${{ env.SUBNET_1 }}
-            PublicSubnet2=${{ env.SUBNET_2 }}
-          capabilities: CAPABILITY_IAM
+          parameter-overrides: >
+            VpcId=${{ env.VPC_ID }},
+            SubnetAId=${{ env.SUBNET_1 }},
+            SubnetBId=${{ env.SUBNET_2 }},
+            ECRImageTag=${{ github.sha }}
+          capabilities: CAPABILITY_NAMED_IAM
+          template-file: car-damage-inference-stack.yaml
