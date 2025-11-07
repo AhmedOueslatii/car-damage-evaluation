@@ -3,28 +3,34 @@ Description: YOLOv11 Car Damage Inference API deployed on AWS ECS Fargate.
 
 Parameters:
   # ------------------------------------------------------------------
-  # PARAMÈTRES RÉSEAU OBLIGATOIRES POUR FARGATE
+  # PARAMÈTRES ENVOYÉS DEPUIS LE WORKFLOW CI/CD
   # ------------------------------------------------------------------
-  VPCID: # CORRECTION: Ancien nom 'DefaultVPC'
-    Type: AWS::EC2::VPC::Id
-    Description: L'ID du VPC existant où Fargate sera déployé.
-    Default: vpc-095f1ea82ca7a98f7 # REMPLACER PAR VOTRE ID VPC
+  VpcId: # (CORRESPOND AU CI/CD)
+    Type: String
+    Description: The ID of the VPC existing where Fargate will be deployed.
+    Default: vpc-095f1ea82ca7a98f7
 
-  PublicSubnet1:
-    Type: AWS::EC2::Subnet::Id
-    Description: L'ID du premier sous-réseau public pour le ALB et Fargate.
-    Default: subnet-0c1ea539005746ae3 # CORRECTION : Utilisation de l'ID validé précédemment
+  SubnetAId: # (CORRESPOND AU CI/CD)
+    Type: String
+    Description: ID of the first public subnet for the ALB and Fargate.
+    Default: subnet-0c1ea539005746ae3
 
-  PublicSubnet2:
-    Type: AWS::EC2::Subnet::Id
-    Description: L'ID du second sous-réseau public pour la haute disponibilité.
-    Default: subnet-0021824dd966cb43f # CORRECTION : Utilisation de l'ID validé précédemment
-
-  ContainerPort: # PARAMÈTRE AJOUTÉ (il était référencé mais non défini)
+  SubnetBId: # (CORRESPOND AU CI/CD)
+    Type: String
+    Description: ID of the second public subnet for high availability.
+    Default: subnet-0021824dd966cb43f
+    
+  ECRImageTag: # (AJOUTÉ ET CORRESPOND AU CI/CD)
+    Type: String
+    Description: The Docker image tag to deploy (the commit SHA).
+    
+  # ------------------------------------------------------------------
+  # PARAMÈTRE INTERNE DU TEMPLATE CFN (NON ENVOYÉ PAR LE CI/CD)
+  # ------------------------------------------------------------------
+  ContainerPort: # (RÉ-AJOUTÉ)
     Type: Number
-    Description: Le port d'écoute de l'application conteneurisée.
+    Description: The listening port of the containerized application.
     Default: 8080
-
 
 Resources:
   # ------------------------------------------------------------------
