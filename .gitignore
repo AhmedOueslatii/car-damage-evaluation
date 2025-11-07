@@ -1,9 +1,11 @@
-﻿#AWS
+﻿Exclusions spécifiques à AWS (pour la sécurité et la propreté)
 
 .aws/
 *.pem
+*.key
+*.cer
 
-Python
+Exclusions Python et environnements
 
 pycache/
 *.pyc
@@ -12,6 +14,14 @@ venv/
 .venv/
 .mypy_cache/
 .pytest_cache/
+*.dist-info/
+*.egg-info/
+
+NOUVELLE RÈGLE CRUCIALE : Exclure les dépendances lourdes pour le déploiement
+
+Ce dossier contenait ultralytics et toutes les libs Python.
+
+infrastructure/lambda_deploy/
 
 Modèles ML et Sorties d'Entraînement (CRUCIAL)
 
@@ -19,31 +29,31 @@ Modèles ML et Sorties d'Entraînement (CRUCIAL)
 *.pth
 *.h5
 *.pkl
-runs/  # <-- DOSSERS DE LOGS ET RÉSULTATS YOLO/PYTORCH
+runs/
 logs/
 output/
 
-Données (selon vos chemins d'accès)
+Données LOURDES (Exclut les jeux de données)
 
 data/raw/*
 data/processed/*
 
-Si vous voulez garder une structure de dossier vide (pour Git), utilisez:
+Conserver la structure de dossiers vide pour les données
 
 !data/raw/.gitkeep
-
 !data/processed/.gitkeep
 
-Images et Fichiers Temporaires (Sauf si nécessaire pour le code source)
+Fichiers d'IDE et de Système d'Exploitation
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+Images et Fichiers Temporaires
 
 *.jpg
 *.png
 *.jpeg
 *.gif
 *.mp4
-
-IDE et OS
-
-.vscode/
-.idea/
-.DS_Store
