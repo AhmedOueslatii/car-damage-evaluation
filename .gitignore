@@ -1,0 +1,49 @@
+﻿#AWS
+
+.aws/
+*.pem
+
+Python
+
+pycache/
+*.pyc
+.env
+venv/
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+Modèles ML et Sorties d'Entraînement (CRUCIAL)
+
+*.pt
+*.pth
+*.h5
+*.pkl
+runs/  # <-- DOSSERS DE LOGS ET RÉSULTATS YOLO/PYTORCH
+logs/
+output/
+
+Données (selon vos chemins d'accès)
+
+data/raw/*
+data/processed/*
+
+Si vous voulez garder une structure de dossier vide (pour Git), utilisez:
+
+!data/raw/.gitkeep
+
+!data/processed/.gitkeep
+
+Images et Fichiers Temporaires (Sauf si nécessaire pour le code source)
+
+*.jpg
+*.png
+*.jpeg
+*.gif
+*.mp4
+
+IDE et OS
+
+.vscode/
+.idea/
+.DS_Store

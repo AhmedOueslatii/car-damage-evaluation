@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 4
+names: ['Accident', 'Dent', 'Glass-Break', 'Scratch']
+
+roboflow:
+  workspace: ahmed-mozg7
+  project: car-defect-v4-lmhps
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/ahmed-mozg7/car-defect-v4-lmhps/dataset/1

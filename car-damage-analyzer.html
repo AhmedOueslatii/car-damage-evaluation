@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse de Dommages de Voiture par IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        /* Custom styles for the app */
+        .card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        #result-canvas {
+            border: 2px dashed #9ca3af;
+            background-color: #ffffff;
+            /* Ensures the canvas takes max width of its container but maintains aspect ratio */
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white rounded-xl p-6 md:p-10 card">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">Analyse de Dommages de Voiture</h1>
+        <p class="text-gray-600 mb-6">Téléchargez une image pour obtenir une détection de dommages, une estimation des coûts, et une visualisation instantanée.</p>
+
+        <!-- Configuration de l'API -->
+        <div class="mb-6 p-4 border border-blue-200 bg-blue-50 rounded-lg">
+            <label for="api-url" class="block text-sm font-medium text-gray-700">Endpoint de l'API (ALB Fargate) :</label>
+            <input type="text" id="api-url" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 focus:border-indigo-500 focus:ring-indigo-500 text-sm" 
+                   value="http://CarDamageALB-1000365265.eu-central-1.elb.amazonaws.com" 
+                   disabled>
+        </div>
+
+        <!-- Section Téléchargement de l'Image -->
+        <div class="mb-8">
+            <label for="image-upload" class="block text-lg font-semibold text-gray-800 mb-2">1. Sélectionner l'Image</label>
+            <input type="file" id="image-upload" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+        </div>
+
+        <!-- Bouton et Affichage du Statut -->
+        <button id="analyze-button" class="w-full md:w-auto px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition ease-in-out duration-150 disabled:opacity-50" disabled>
+            Analyser l'Image
+        </button>
+
+        <p id="status-message" class="mt-4 text-center text-gray-600 h-6"></p>
+
+        <!-- Conteneur des Résultats -->
+        <div id="results-container" class="mt-10 hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Résumé des Coûts (Colonne de Gauche/Haut) -->
+                <div class="lg:col-span-1 bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <h2 class="text-xl font-bold text-indigo-700 mb-4">Résumé des Dommages</h2>
+                    <div id="total-cost" class="mb-4">
+                        <p class="text-sm font-medium text-gray-500">Coût Total Estimé :</p>
+                        <p class="text-4xl font-extrabold text-green-600">-- €</p>
+                    </div>
+                    <div id="detection-details" class="space-y-3">
+                        <p class="text-sm text-gray-500">Détails des détections :</p>
+                        <!-- Les détails des détections vont ici -->
+                    </div>
+                </div>
+
+                <!-- Visualisation (Colonne de Droite) -->
+                <div class="lg:col-span-2">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Visualisation</h2>
+                    <div class="relative w-full overflow-hidden rounded-lg">
+                        <!-- Le canvas est là où l'image et les boîtes seront dessinées -->
+                        <canvas id="result-canvas" class="w-full"></canvas>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const API_URL_INPUT = document.getElementById('api-url');
+        const IMAGE_UPLOAD = document.getElementById('image-upload');
+        const ANALYZE_BUTTON = document.getElementById('analyze-button');
+        const STATUS_MESSAGE = document.getElementById('status-message');
+        const RESULTS_CONTAINER = document.getElementById('results-container');
+        const TOTAL_COST_DISPLAY = document.getElementById('total-cost').querySelector('p:last-child');
+        const DETAILS_CONTAINER = document.getElementById('detection-details');
+        const CANVAS = document.getElementById('result-canvas');
+        const CTX = CANVAS.getContext('2d');
+
+        // Mappage des classes (doit correspondre à la logique du backend)
+        const CLASS_MAPPING = {
+            0: { label: "Dommage Carrosserie Général", color: "#FFC300" }, // Jaune
+            1: { label: "Dommage Phare/Lumière", color: "#FF5733" },       // Orange/Rouge
+        };
+
+        // Estimation simplifiée du coût (doit correspondre à la logique du client Python)
+        function estimateCost(width, height, box, classId) {
+            // Coordonnées normalisées (0-1)
+            const x_min = box[0] / width;
+            const y_min = box[1] / height;
+            const x_max = box[2] / width;
+            const y_max = box[3] / height;
+            
+            // Calcul de la zone du dommage (normalisée)
+            const area = (x_max - x_min) * (y_max - y_min);
+            
+            let baseCost = 0;
+            const multiplier = 5000; // Multiplicateur de coût (5000 €/unité de surface normalisée)
+
+            if (classId === 0) {
+                baseCost = 250; // Coût minimum de carrosserie
+            } else if (classId === 1) {
+                baseCost = 400; // Coût d'un phare neuf
+            }
+
+            const totalCost = baseCost + (area * multiplier);
+            return parseFloat(totalCost.toFixed(2));
+        }
+
+        // --- GESTION DES FICHIERS ET API ---
+
+        // Écouteur pour l'upload de fichier
+        IMAGE_UPLOAD.addEventListener('change', () => {
+            ANALYZE_BUTTON.disabled = !IMAGE_UPLOAD.files.length;
+            RESULTS_CONTAINER.classList.add('hidden');
+            STATUS_MESSAGE.textContent = IMAGE_UPLOAD.files.length ? `Prêt à analyser : ${IMAGE_UPLOAD.files[0].name}` : '';
+        });
+
+        // Écouteur pour le bouton d'analyse
+        ANALYZE_BUTTON.addEventListener('click', async () => {
+            const file = IMAGE_UPLOAD.files[0];
+            if (!file) return;
+
+            ANALYZE_BUTTON.disabled = true;
+            STATUS_MESSAGE.textContent = 'Conversion en Base64...';
+
+            // 1. Convertir l'image en Base64
+            const base64Image = await fileToBase64(file);
+            if (!base64Image) {
+                STATUS_MESSAGE.textContent = 'Erreur lors de la conversion de l\'image.';
+                ANALYZE_BUTTON.disabled = false;
+                return;
+            }
+
+            // 2. Préparer et envoyer la requête
+            STATUS_MESSAGE.textContent = 'Envoi de l\'image à l\'API Fargate (cela peut prendre un moment)...';
+            RESULTS_CONTAINER.classList.add('hidden');
+            
+            const payload = {
+                image: base64Image.split(',')[1], // Nettoyer le préfixe 'data:image/...'
+                image_id: `webapp-${file.name}-${Date.now()}`
+            };
+
+            try {
+                const response = await fetch(API_URL_INPUT.value + '/inference', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    // Le timeout est géré par l'ALB (typique de 60s)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`Erreur API: ${response.status} - ${errorData.error || response.statusText}`);
+                }
+
+                const results = await response.json();
+
+                // 3. Traiter les résultats
+                STATUS_MESSAGE.textContent = `Analyse réussie. Détections trouvées: ${results.detection_count}`;
+                
+                processResults(file, results);
+
+            } catch (error) {
+                console.error('Erreur d\'analyse:', error);
+                STATUS_MESSAGE.textContent = `Échec de l'analyse : ${error.message}`;
+            } finally {
+                ANALYZE_BUTTON.disabled = false;
+            }
+        });
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        // --- TRAITEMENT ET AFFICHAGE DES RÉSULTATS ---
+        
+        function processResults(originalFile, results) {
+            const detections = results.detections || [];
+            let totalCost = 0;
+            let detailsHtml = '';
+
+            // Charger l'image dans un objet Image
+            const img = new Image();
+            img.onload = () => {
+                // Ajuster la taille du canvas à l'image originale
+                CANVAS.width = img.naturalWidth;
+                CANVAS.height = img.naturalHeight;
+
+                // Dessiner l'image originale
+                CTX.drawImage(img, 0, 0);
+
+                // Dessiner les boîtes et calculer les coûts
+                detections.forEach((det, index) => {
+                    const cost = estimateCost(CANVAS.width, CANVAS.height, det.box, det.class);
+                    totalCost += cost;
+
+                    const classInfo = CLASS_MAPPING[det.class] || { label: `Inconnu (${det.class})`, color: "#000000" };
+                    const label = classInfo.label;
+                    const color = classInfo.color;
+
+                    // Dessiner la boîte
+                    drawBox(det.box, color, label, det.confidence, cost);
+                    
+                    // Ajouter les détails à l'HTML
+                    detailsHtml += `
+                        <div class="flex items-center space-x-2">
+                            <span class="inline-block w-3 h-3 rounded-full" style="background-color: ${color};"></span>
+                            <div>
+                                <p class="text-gray-900 font-semibold">${label}</p>
+                                <p class="text-sm text-gray-700">Confiance: ${(det.confidence * 100).toFixed(1)}%</p>
+                                <p class="text-sm text-green-600 font-bold">Coût Est.: ${cost.toFixed(2)} €</p>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // Mettre à jour l'affichage
+                TOTAL_COST_DISPLAY.textContent = `${totalCost.toFixed(2)} €`;
+                DETAILS_CONTAINER.innerHTML = detailsHtml || '<p class="text-sm text-gray-500">Aucun dommage détecté. Coût: 0.00 €</p>';
+                RESULTS_CONTAINER.classList.remove('hidden');
+            };
+            
+            // Lire le fichier pour l'objet Image
+            const reader = new FileReader();
+            reader.onload = (e) => img.src = e.target.result;
+            reader.readAsDataURL(originalFile);
+        }
+
+        function drawBox(box, color, label, confidence, cost) {
+            const [x_min, y_min, x_max, y_max] = box;
+
+            // Dessiner le rectangle
+            CTX.strokeStyle = color;
+            CTX.lineWidth = 3;
+            CTX.strokeRect(x_min, y_min, x_max - x_min, y_max - y_min);
+
+            // Dessiner le fond du texte
+            const textContent = `${label} | ${cost.toFixed(2)} €`;
+            CTX.font = '16px Inter';
+            const textMetrics = CTX.measureText(textContent);
+            const textHeight = 20; // Approximation de la hauteur
+            const textX = x_min;
+            const textY = y_min - textHeight;
+
+            // S'assurer que le fond du texte est dans les limites
+            if (textY < 0) {
+                // Si la boîte est en haut, dessiner le texte en bas de la boîte
+                CTX.fillStyle = color;
+                CTX.fillRect(x_min, y_max, textMetrics.width + 10, textHeight);
+                CTX.fillStyle = 'white';
+                CTX.fillText(textContent, x_min + 5, y_max + textHeight - 5);
+            } else {
+                // Dessiner le texte au-dessus de la boîte
+                CTX.fillStyle = color;
+                CTX.fillRect(textX, textY, textMetrics.width + 10, textHeight);
+                CTX.fillStyle = 'white';
+                CTX.fillText(textContent, x_min + 5, y_min - 5);
+            }
+        }
+
+    </script>
+</body>
+</html>
