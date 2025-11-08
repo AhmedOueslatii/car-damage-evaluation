@@ -75,15 +75,16 @@ jobs:
 
       - name: Déploiement de la mise à jour de la Stack CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
         with:
           name: ${{ env.STACK_NAME }}
           template: car-damage-inference-stack.yaml
-          region: ${{ env.AWS_REGION }}
           capabilities: CAPABILITY_NAMED_IAM
-          # FIXED: Reference the step output directly, not through env
+          # FIXED: Use the exact parameter names from your existing CloudFormation stack
           parameter-overrides: >-
-            VpcId=${{ env.VPC_ID }},
-            SubnetAId=${{ env.SubnetAId }},
-            SubnetBId=${{ env.SubnetBId }},
+            VPCID=${{ env.VPC_ID }},
+            PublicSubnet1=${{ env.SubnetAId }},
+            PublicSubnet2=${{ env.SubnetBId }},
             ContainerPort=${{ env.ContainerPort }},
             ECRImageTag=${{ steps.push-image.outputs.image_uri }}
