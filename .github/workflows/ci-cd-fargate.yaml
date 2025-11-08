@@ -81,10 +81,10 @@ jobs:
           name: ${{ env.STACK_NAME }}
           template: car-damage-inference-stack.yaml
           capabilities: CAPABILITY_NAMED_IAM
-          # FIXED: Match the exact parameter names from the CloudFormation template
+          # FIXED: Match the existing stack parameter names (VPCID, PublicSubnet1, PublicSubnet2)
           parameter-overrides: >-
-            VpcId=${{ env.VPC_ID }},
-            SubnetAId=${{ env.SubnetAId }},
-            SubnetBId=${{ env.SubnetBId }},
+            VPCID=${{ env.VPC_ID }},
+            PublicSubnet1=${{ env.SubnetAId }},
+            PublicSubnet2=${{ env.SubnetBId }},
             ContainerPort=${{ env.ContainerPort }},
             ECRImageTag=${{ steps.push-image.outputs.image_uri }}

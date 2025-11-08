@@ -4,29 +4,29 @@ Description: |
   Utilise un VPC existant et déploie un Service ECS avec un ALB public.
 
 # ------------------------------------------------------------------
-# PARAMETERS: Synchronized to match the CI/CD workflow inputs
+# PARAMETERS: Must match the existing stack parameter names
 # ------------------------------------------------------------------
 Parameters:
-  VpcId: # Parameter sent by GitHub Actions
+  VPCID:  # Changed from VpcId to match existing stack
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
     Default: vpc-095f1ea82ca7a98f7
 
-  SubnetAId: # Parameter sent by GitHub Actions (Replaces PublicSubnet1)
+  PublicSubnet1:  # Changed from SubnetAId to match existing stack
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
     Default: subnet-0c1ea539005746ae3
 
-  SubnetBId: # Parameter sent by GitHub Actions (Replaces PublicSubnet2)
+  PublicSubnet2:  # Changed from SubnetBId to match existing stack
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
     Default: subnet-0021824dd966cb43f
     
-  ECRImageTag: # Parameter sent by GitHub Actions (Git SHA)
+  ECRImageTag:  # This is new, so it's fine
     Type: String
     Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
-  ContainerPort: # Internal parameter needed by the template
+  ContainerPort:  # This exists in the old stack, keep the name
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
@@ -46,7 +46,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/CarDamageInference
-      RetentionInDays: 7 # Added retention for best practice
+      RetentionInDays: 7
 
   # 3. IAM Roles (Execution Role for ECS)
   ECSTaskExecutionRole:
@@ -75,7 +75,6 @@ Resources:
       TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn 
       ContainerDefinitions:
         - Name: car-damage-inference-container
-          # This is the correct reference inside CloudFormation
           Image: !Ref ECRImageTag
           PortMappings:
             - ContainerPort: !Ref ContainerPort
@@ -91,7 +90,7 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VpcId
+      VpcId: !Ref VPCID  # Changed reference
       GroupDescription: Security Group for ALB (Public HTTP)
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -103,14 +102,13 @@ Resources:
   FargateSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VpcId
+      VpcId: !Ref VPCID  # Changed reference
       GroupDescription: Security Group for Fargate Tasks (Internal access from ALB)
       SecurityGroupIngress:
-        # Allow ingress traffic from the ALB Security Group to the Container Port
         - IpProtocol: tcp
           FromPort: !Ref ContainerPort
           ToPort: !Ref ContainerPort
-          SourceSecurityGroupId: !Ref ALBSecurityGroup # Only allow traffic from the ALB
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
 
   # 7. Application Load Balancer (ALB)
   ALB:
@@ -118,16 +116,16 @@ Resources:
     Properties:
       Scheme: internet-facing
       Subnets:
-        - !Ref SubnetAId
-        - !Ref SubnetBId
+        - !Ref PublicSubnet1  # Changed reference
+        - !Ref PublicSubnet2  # Changed reference
       SecurityGroups:
-        - !Ref ALBSecurityGroup # Use the ALB's specific security group
+        - !Ref ALBSecurityGroup
 
   # 8. Target Group
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      VpcId: !Ref VpcId
+      VpcId: !Ref VPCID  # Changed reference
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
@@ -151,7 +149,6 @@ Resources:
   # 10. ECS Service
   ECSService:
     Type: AWS::ECS::Service
-    # Add dependency to ensure Listener and ALB are ready before service deployment
     DependsOn: Listener
     Properties:
       Cluster: !Ref ECSCluster
@@ -165,10 +162,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !Ref SubnetAId
-            - !Ref SubnetBId
+            - !Ref PublicSubnet1  # Changed reference
+            - !Ref PublicSubnet2  # Changed reference
           SecurityGroups:
-            - !Ref FargateSecurityGroup # Use the Fargate's specific security group
+            - !Ref FargateSecurityGroup
           AssignPublicIp: ENABLED
       LoadBalancers:
         - ContainerName: car-damage-inference-container
