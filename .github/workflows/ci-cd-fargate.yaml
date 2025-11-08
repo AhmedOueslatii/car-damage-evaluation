@@ -1,70 +1,79 @@
-name: Deploy Fargate Service
+name: Déploiement Continu vers Fargate (ECS/CloudFormation)
 
 on:
   push:
     branches:
       - main
-      
-# Environment variables for configuration
-env:
-  AWS_REGION: eu-central-1 # Or your desired AWS region
-  
-  # ECR Configuration
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-  ECR_REPOSITORY: car-damage-inference-repo
-  IMAGE_TAG: ${{ github.sha }}
+  workflow_dispatch:
 
-  # CloudFormation Stack Parameters
+env:
+  # Configuration AWS et Région (eu-central-1)
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: car-damage-inference-repo
+  STACK_NAME: CarDamageInferenceStack
+
+  # Paramètres CloudFormation (vérifiés précédemment)
   VPC_ID: vpc-095f1ea82ca7a98f7 # UPDATE with your actual VPC ID
-  # RENAMED to match CloudFormation template parameters
   SubnetAId: subnet-0c1ea539005746ae3 # UPDATE with your actual Subnet ID A
   SubnetBId: subnet-0021824dd966cb43f # UPDATE with your actual Subnet ID B
   ContainerPort: 8080
 
+  # Contexte de construction Docker: '.' signifie que le Dockerfile est à la racine
+  DOCKERFILE_CONTEXT: .
+
 jobs:
   deploy:
+    name: Déploiement
     runs-on: ubuntu-latest
-    environment: production
     
-    # Permissions required to deploy to AWS
-    permissions:
-      id-token: write
-      contents: read
-
     steps:
-    - name: Checkout du Code
-      uses: actions/checkout@v4
+      - name: Set up job
+        uses: actions/checkout@v4
 
-    - name: Configuration des Identifiants AWS
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configuration des Identifiants AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login à Amazon ECR
-      uses: aws-actions/amazon-ecr-login@v2
-      id: login-ecr
+      - name: Login à Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build et Tag de l'image Docker
-      run: |
-        # Use the ECR repository as the target for the image build
-        docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
+      - name: Build et Tag de l'image Docker
+        id: build-image
+        env:
+          # FIX: Assurez-vous que l'URL du registre est définie correctement
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Building image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          # Utilisation du contexte '.' qui assume le Dockerfile est à la racine
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-    - name: Push de l'Image vers ECR
-      run: |
-        docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-        
-    - name: Déploiement de la mise à jour de la Stack CloudFormation
-      uses: aws-actions/aws-cloudformation-github-deploy@v1
-      with:
-        name: CarDamageInferenceStack
-        # The template file is in the root directory
-        template: car-damage-inference-stack.yaml
-        capabilities: CAPABILITY_NAMED_IAM
-        parameter-overrides: |
-          VpcId=${{ env.VPC_ID }}
-          # ECRImageTag must include the full ECR path
-          ECRImageTag=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          SubnetAId=${{ env.SubnetAId }}
-          SubnetBId=${{ env.SubnetBId }}
-          ContainerPort=${{ env.ContainerPort }}
+      - name: Push de l'image vers ECR
+        id: push-image
+        env:
+          # FIX: Assurez-vous que l'URL du registre est définie correctement
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Pushing image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Déploiement de la mise à jour de la Stack CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: ${{ env.STACK_NAME }}
+          template: car-damage-inference-stack.yaml
+          region: ${{ env.AWS_REGION }}
+          parameter-overrides: >
+            VpcId=${{ env.VPC_ID }},
+            SubnetAId=${{ env.SUBNET_1 }},
+            SubnetBId=${{ env.SUBNET_2 }},
+            ECRImageTag=${{ github.sha }}
+          capabilities: CAPABILITY_NAMED_IAM
+          template-file: car-damage-inference-stack.yaml
