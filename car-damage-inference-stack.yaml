@@ -44,10 +44,8 @@ Resources:
   # 2. CloudWatch Log Group
   CloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
-      LogGroupName: /ecs/CarDamageInference
+      LogGroupName: !Sub /ecs/CarDamageInference-${AWS::StackName}
       RetentionInDays: 7
 
   # 3. IAM Roles (Execution Role for ECS)
