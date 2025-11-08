@@ -30,7 +30,7 @@ jobs:
     
     steps:
       - name: Checkout du Code
-        uses: actions:checkout@v4
+        uses: actions/checkout@v4
 
       - name: Configuration des Identifiants AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -55,7 +55,7 @@ jobs:
           docker build -t $IMAGE_URI_SHA -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
           docker tag $IMAGE_URI_SHA $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Push de l'image vers ECR
+      - name: Push de l'image vers ECR and Set Output
         id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -67,11 +67,17 @@ jobs:
           docker push $IMAGE_URI_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          # CRITICAL FIX 1: We are now explicitly writing to the GITHUB_ENV 
-          # so it is available for the rest of the job.
-          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_ENV
+          # CRITICAL: We set the step output using GITHUB_OUTPUT.
+          # We use a unique name to avoid conflicts: JOB_ECR_URI
+          echo "JOB_ECR_URI=$IMAGE_URI_SHA" >> $GITHUB_OUTPUT
 
 
+      # NEW STEP: Convert Step Output into a Job Environment Variable
+      # This is the safest way to ensure the CloudFormation action picks it up.
+      - name: Expose ECR URI to Job Environment
+        run: |
+          echo "ECR_FULL_URI=${{ steps.push-image.outputs.JOB_ECR_URI }}" >> $GITHUB_ENV
+        
       - name: Déploiement de la mise à jour de la Stack CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
@@ -79,11 +85,10 @@ jobs:
           template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
           capabilities: CAPABILITY_NAMED_IAM
-          # Use the environment variable reference method
           parameter-overrides: |
             VpcId=${{ env.VPC_ID }}
             SubnetAId=${{ env.SubnetAId }}
             SubnetBId=${{ env.SubnetBId }}
             ContainerPort=${{ env.ContainerPort }}
-            # CRITICAL FIX 2: Use the env context, which is set via $GITHUB_ENV
+            # Reference the variable from the JOB environment (ECR_FULL_URI)
             ECRImageTag=${{ env.ECR_FULL_URI }}
