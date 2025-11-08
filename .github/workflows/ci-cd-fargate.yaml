@@ -24,6 +24,9 @@ jobs:
   deploy:
     name: Déploiement
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Added for OIDC role assumption (good security practice)
     
     steps:
       - name: Checkout du Code
@@ -64,8 +67,8 @@ jobs:
           docker push $IMAGE_URI_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          # Output the full image URI for CloudFormation to use
-          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_ENV
+          # CRITICAL FIX 1: Use $GITHUB_OUTPUT to register the variable as a step output
+          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_OUTPUT
 
 
       - name: Déploiement de la mise à jour de la Stack CloudFormation
@@ -75,10 +78,11 @@ jobs:
           template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
           capabilities: CAPABILITY_NAMED_IAM
-          # Correctly referencing all environment variables defined above
+          # Use the new, reliable reference method
           parameter-overrides: |
             VpcId=${{ env.VPC_ID }}
             SubnetAId=${{ env.SubnetAId }}
             SubnetBId=${{ env.SubnetBId }}
             ContainerPort=${{ env.ContainerPort }}
-            ECRImageTag=${{ env.ECR_FULL_URI }}
+            # CRITICAL FIX 2: Reference the step output directly
+            ECRImageTag=${{ steps.push-image.outputs.ECR_FULL_URI }}
