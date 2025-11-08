@@ -2,22 +2,27 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: AWS CloudFormation stack for deploying a Fargate ECS Service with Load Balancer.
 
 # --- Parameters (Names match the CI/CD workflow exactly) ---
+
+
 Parameters:
   VpcId:
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
-    
+    Default: vpc-095f1ea82ca7a98f7
+
   SubnetAId:
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
+    Default: subnet-0c1ea539005746ae3
 
   SubnetBId:
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
+    Default: subnet-0021824dd966cb43f
     
   ECRImageTag:
     Type: String
-    Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
+    Description: Le tag de l'image Docker à déployer depuis ECR (le SHA du commit).
     
   ContainerPort:
     Type: Number
@@ -162,3 +167,18 @@ Outputs:
   ServiceURL:
     Description: L'URL publique de l'application Fargate
     Value: !Sub "http://${ALB.DNSName}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
