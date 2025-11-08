@@ -26,11 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # Added for OIDC role assumption (good security practice)
+      id-token: write 
     
     steps:
       - name: Checkout du Code
-        uses: actions/checkout@v4
+        uses: actions:checkout@v4
 
       - name: Configuration des Identifiants AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -67,8 +67,9 @@ jobs:
           docker push $IMAGE_URI_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          # CRITICAL FIX 1: Use $GITHUB_OUTPUT to register the variable as a step output
-          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_OUTPUT
+          # CRITICAL FIX 1: We are now explicitly writing to the GITHUB_ENV 
+          # so it is available for the rest of the job.
+          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_ENV
 
 
       - name: Déploiement de la mise à jour de la Stack CloudFormation
@@ -78,11 +79,11 @@ jobs:
           template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
           capabilities: CAPABILITY_NAMED_IAM
-          # Use the new, reliable reference method
+          # Use the environment variable reference method
           parameter-overrides: |
             VpcId=${{ env.VPC_ID }}
             SubnetAId=${{ env.SubnetAId }}
             SubnetBId=${{ env.SubnetBId }}
             ContainerPort=${{ env.ContainerPort }}
-            # CRITICAL FIX 2: Reference the step output directly
-            ECRImageTag=${{ steps.push-image.outputs.ECR_FULL_URI }}
+            # CRITICAL FIX 2: Use the env context, which is set via $GITHUB_ENV
+            ECRImageTag=${{ env.ECR_FULL_URI }}

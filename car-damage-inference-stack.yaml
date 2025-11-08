@@ -60,7 +60,6 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
         - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
-      # Removed inline policies as the ManagedPolicyArns cover ECR and CWLogs access now.
 
   # 4. Task Definition (Fargate)
   TaskDefinition:
@@ -76,7 +75,7 @@ Resources:
       TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn 
       ContainerDefinitions:
         - Name: car-damage-inference-container
-          # FIX: Use the ECRImageTag directly. The CI/CD job passes the full URI.
+          # This is the correct reference inside CloudFormation
           Image: !Ref ECRImageTag
           PortMappings:
             - ContainerPort: !Ref ContainerPort
