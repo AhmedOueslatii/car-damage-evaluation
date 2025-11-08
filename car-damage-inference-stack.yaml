@@ -1,35 +1,39 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS CloudFormation stack for deploying a Fargate ECS Service with Load Balancer.
+Description: |
+  Déploiement d'une application de Car Damage Inference sur AWS Fargate.
+  Utilise un VPC existant et déploie un Service ECS avec un ALB public.
 
-# --- Parameters (Names match the CI/CD workflow exactly) ---
-
-
+# ------------------------------------------------------------------
+# PARAMETERS: Synchronized to match the CI/CD workflow inputs
+# ------------------------------------------------------------------
 Parameters:
-  VpcId:
+  VpcId: # Parameter sent by GitHub Actions
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
     Default: vpc-095f1ea82ca7a98f7
 
-  SubnetAId:
+  SubnetAId: # Parameter sent by GitHub Actions (Replaces PublicSubnet1)
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
     Default: subnet-0c1ea539005746ae3
 
-  SubnetBId:
+  SubnetBId: # Parameter sent by GitHub Actions (Replaces PublicSubnet2)
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
     Default: subnet-0021824dd966cb43f
     
-  ECRImageTag:
+  ECRImageTag: # Parameter sent by GitHub Actions (Git SHA)
     Type: String
-    Description: Le tag de l'image Docker à déployer depuis ECR (le SHA du commit).
+    Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
-  ContainerPort:
+  ContainerPort: # Internal parameter needed by the template
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
 
-# --- Resources ---
+# ------------------------------------------------------------------
+# RESOURCES: Infrastructure Definition
+# ------------------------------------------------------------------
 Resources:
   # 1. ECS Cluster
   ECSCluster:
@@ -42,7 +46,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/CarDamageInference
-      RetentionInDays: 7
+      RetentionInDays: 7 # Added retention for best practice
 
   # 3. IAM Roles (Execution Role for ECS)
   ECSTaskExecutionRole:
@@ -56,22 +60,24 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
         - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
+      # Removed inline policies as the ManagedPolicyArns cover ECR and CWLogs access now.
 
   # 4. Task Definition (Fargate)
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: CarDamageInferenceTask
-      Cpu: 1024
-      Memory: 2048
+      Cpu: 256
+      Memory: 512
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn 
       ContainerDefinitions:
         - Name: car-damage-inference-container
-          Image: !Ref ECRImageTag # Use the full URI passed as parameter
+          # FIX: Use the ECRImageTag directly. The CI/CD job passes the full URI.
+          Image: !Ref ECRImageTag
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
@@ -99,13 +105,13 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       VpcId: !Ref VpcId
-      GroupDescription: Security Group for Fargate Tasks (Internal)
+      GroupDescription: Security Group for Fargate Tasks (Internal access from ALB)
       SecurityGroupIngress:
         # Allow ingress traffic from the ALB Security Group to the Container Port
         - IpProtocol: tcp
           FromPort: !Ref ContainerPort
           ToPort: !Ref ContainerPort
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          SourceSecurityGroupId: !Ref ALBSecurityGroup # Only allow traffic from the ALB
 
   # 7. Application Load Balancer (ALB)
   ALB:
@@ -116,17 +122,21 @@ Resources:
         - !Ref SubnetAId
         - !Ref SubnetBId
       SecurityGroups:
-        - !Ref ALBSecurityGroup
+        - !Ref ALBSecurityGroup # Use the ALB's specific security group
 
   # 8. Target Group
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId: !Ref VpcId
-      Port: !Ref ContainerPort # Listen on the container port
+      Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
 
   # 9. Listener
   Listener:
@@ -142,7 +152,7 @@ Resources:
   # 10. ECS Service
   ECSService:
     Type: AWS::ECS::Service
-    # Ensure Listener is created before the service tries to attach to the load balancer
+    # Add dependency to ensure Listener and ALB are ready before service deployment
     DependsOn: Listener
     Properties:
       Cluster: !Ref ECSCluster
@@ -150,35 +160,28 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
             - !Ref SubnetAId
             - !Ref SubnetBId
           SecurityGroups:
-            - !Ref FargateSecurityGroup
+            - !Ref FargateSecurityGroup # Use the Fargate's specific security group
           AssignPublicIp: ENABLED
       LoadBalancers:
         - ContainerName: car-damage-inference-container
           ContainerPort: !Ref ContainerPort
           TargetGroupArn: !Ref TargetGroup
-      
+          
+# ------------------------------------------------------------------
+# OUTPUTS
+# ------------------------------------------------------------------
 Outputs:
   ServiceURL:
     Description: L'URL publique de l'application Fargate
     Value: !Sub "http://${ALB.DNSName}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    Export:
+      Name: CarDamageInferenceServiceURL
