@@ -7,18 +7,17 @@ on:
   workflow_dispatch:
 
 env:
-  # Configuration AWS et Région (eu-central-1)
+  # --- AWS Configuration ---
   AWS_REGION: eu-central-1
   ECR_REPOSITORY: car-damage-inference-repo
   STACK_NAME: CarDamageInferenceStack
 
-  # Paramètres CloudFormation (vérifiés précédemment)
-  VPC_ID: vpc-095f1ea82ca7a98f7 # UPDATE with your actual VPC ID
-  SubnetAId: subnet-0c1ea539005746ae3 # UPDATE with your actual Subnet ID A
-  SubnetBId: subnet-0021824dd966cb43f # UPDATE with your actual Subnet ID B
+  # --- CloudFormation Parameters (These are the source of truth) ---
+  VPC_ID: vpc-095f1ea82ca7a98f7
+  SubnetAId: subnet-0c1ea539005746ae3 
+  SubnetBId: subnet-0021824dd966cb43f
   ContainerPort: 8080
 
-  # Contexte de construction Docker: '.' signifie que le Dockerfile est à la racine
   DOCKERFILE_CONTEXT: .
 
 jobs:
@@ -27,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Set up job
+      - name: Checkout du Code
         uses: actions/checkout@v4
 
       - name: Configuration des Identifiants AWS
@@ -44,25 +43,30 @@ jobs:
       - name: Build et Tag de l'image Docker
         id: build-image
         env:
-          # FIX: Assurez-vous que l'URL du registre est définie correctement
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Building image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          # Utilisation du contexte '.' qui assume le Dockerfile est à la racine
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          IMAGE_URI_SHA=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "Building image: $IMAGE_URI_SHA"
+          docker build -t $IMAGE_URI_SHA -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
+          docker tag $IMAGE_URI_SHA $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Push de l'image vers ECR
         id: push-image
         env:
-          # FIX: Assurez-vous que l'URL du registre est définie correctement
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Pushing image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          IMAGE_URI_SHA=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "Pushing image: $IMAGE_URI_SHA"
+          docker push $IMAGE_URI_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Output the full image URI for CloudFormation to use
+          echo "ECR_FULL_URI=$IMAGE_URI_SHA" >> $GITHUB_ENV
+
 
       - name: Déploiement de la mise à jour de la Stack CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
@@ -70,10 +74,11 @@ jobs:
           name: ${{ env.STACK_NAME }}
           template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
-          parameter-overrides: >
-            VpcId=${{ env.VPC_ID }},
-            SubnetAId=${{ env.SUBNET_1 }},
-            SubnetBId=${{ env.SUBNET_2 }},
-            ECRImageTag=${{ github.sha }}
           capabilities: CAPABILITY_NAMED_IAM
-          template-file: car-damage-inference-stack.yaml
+          # Correctly referencing all environment variables defined above
+          parameter-overrides: |
+            VpcId=${{ env.VPC_ID }}
+            SubnetAId=${{ env.SubnetAId }}
+            SubnetBId=${{ env.SubnetBId }}
+            ContainerPort=${{ env.ContainerPort }}
+            ECRImageTag=${{ env.ECR_FULL_URI }}

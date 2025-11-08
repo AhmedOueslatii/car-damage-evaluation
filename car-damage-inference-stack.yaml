@@ -1,33 +1,30 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: |
-  Déploiement d'une application de Car Damage Inference sur AWS Fargate.
-  Utilise un VPC existant et déploie un Service ECS avec un ALB public.
-  
+Description: AWS CloudFormation stack for deploying a Fargate ECS Service with Load Balancer.
+
+# --- Parameters (Names match the CI/CD workflow exactly) ---
 Parameters:
   VpcId:
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
-    Default: vpc-095f1ea82ca7a98f7
-
+    
   SubnetAId:
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
-    Default: subnet-0c1ea539005746ae3
 
   SubnetBId:
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
-    Default: subnet-0021824dd966cb43f
     
   ECRImageTag:
     Type: String
-    Description: Le tag de l'image Docker à déployer depuis ECR (le SHA du commit).
+    Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
   ContainerPort:
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
 
+# --- Resources ---
 Resources:
   # 1. ECS Cluster
   ECSCluster:
@@ -35,30 +32,12 @@ Resources:
     Properties:
       ClusterName: CarDamageInferenceCluster
 
-  # 2. Task Definition (Fargate)
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
+  # 2. CloudWatch Log Group
+  CloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
     Properties:
-      Family: CarDamageInferenceTask
-      Cpu: 256
-      Memory: 512
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      ContainerDefinitions:
-        - Name: car-damage-inference-container
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/car-damage-inference-repo:${ECRImageTag}"
-          PortMappings:
-            - ContainerPort: !Ref ContainerPort
-              Protocol: tcp
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref CloudWatchLogGroup
-              awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: ecs
+      LogGroupName: /ecs/CarDamageInference
+      RetentionInDays: 7
 
   # 3. IAM Roles (Execution Role for ECS)
   ECSTaskExecutionRole:
@@ -71,38 +50,39 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
-      Policies:
-        - PolicyName: ECRAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                Resource: "*"
-        - PolicyName: CWLogsAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !GetAtt CloudWatchLogGroup.Arn
+        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
 
-  # 4. CloudWatch Log Group
-  CloudWatchLogGroup:
-    Type: AWS::Logs::LogGroup
+  # 4. Task Definition (Fargate)
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
     Properties:
-      LogGroupName: /ecs/CarDamageInference
+      Family: CarDamageInferenceTask
+      Cpu: 1024
+      Memory: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: car-damage-inference-container
+          Image: !Ref ECRImageTag # Use the full URI passed as parameter
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs
 
   # 5. Security Group for ALB (Allows public HTTP access)
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security Group for ALB (Public HTTP)
       VpcId: !Ref VpcId
+      GroupDescription: Security Group for ALB (Public HTTP)
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -113,14 +93,14 @@ Resources:
   FargateSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security Group for Fargate Tasks (Internal)
       VpcId: !Ref VpcId
+      GroupDescription: Security Group for Fargate Tasks (Internal)
       SecurityGroupIngress:
         # Allow ingress traffic from the ALB Security Group to the Container Port
         - IpProtocol: tcp
           FromPort: !Ref ContainerPort
           ToPort: !Ref ContainerPort
-          SourceSecurityGroupId: !Ref ALBSecurityGroup # <<<--- NO CIRCULAR DEPENDENCY
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
 
   # 7. Application Load Balancer (ALB)
   ALB:
@@ -131,21 +111,17 @@ Resources:
         - !Ref SubnetAId
         - !Ref SubnetBId
       SecurityGroups:
-        - !Ref ALBSecurityGroup # <<<--- ALB uses the ALBSecurityGroup
+        - !Ref ALBSecurityGroup
 
   # 8. Target Group
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId: !Ref VpcId
-      Port: !Ref ContainerPort
+      Port: !Ref ContainerPort # Listen on the container port
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
 
   # 9. Listener
   Listener:
@@ -161,22 +137,21 @@ Resources:
   # 10. ECS Service
   ECSService:
     Type: AWS::ECS::Service
+    # Ensure Listener is created before the service tries to attach to the load balancer
+    DependsOn: Listener
     Properties:
       Cluster: !Ref ECSCluster
       ServiceName: CarDamageInferenceService
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       DesiredCount: 1
-      DeploymentConfiguration:
-        MaximumPercent: 200
-        MinimumHealthyPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
             - !Ref SubnetAId
             - !Ref SubnetBId
           SecurityGroups:
-            - !Ref FargateSecurityGroup # <<<--- Service uses the FargateSecurityGroup
+            - !Ref FargateSecurityGroup
           AssignPublicIp: ENABLED
       LoadBalancers:
         - ContainerName: car-damage-inference-container
@@ -187,5 +162,3 @@ Outputs:
   ServiceURL:
     Description: L'URL publique de l'application Fargate
     Value: !Sub "http://${ALB.DNSName}"
-    Export:
-      Name: CarDamageInferenceServiceURL
