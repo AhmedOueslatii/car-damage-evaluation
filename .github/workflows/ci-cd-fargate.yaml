@@ -12,7 +12,7 @@ env:
   ECR_REPOSITORY: car-damage-inference-repo
   STACK_NAME: CarDamageInferenceStack
 
-  # --- CloudFormation Parameters (These are the source of truth) ---
+  # --- CloudFormation Parameters ---
   VPC_ID: vpc-095f1ea82ca7a98f7
   SubnetAId: subnet-0c1ea539005746ae3 
   SubnetBId: subnet-0021824dd966cb43f
@@ -55,7 +55,7 @@ jobs:
           docker build -t $IMAGE_URI_SHA -f Dockerfile ${{ env.DOCKERFILE_CONTEXT }}
           docker tag $IMAGE_URI_SHA $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Push de l'image vers ECR and Set Output
+      - name: Push de l'image vers ECR
         id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -67,17 +67,12 @@ jobs:
           docker push $IMAGE_URI_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          # CRITICAL: We set the step output using GITHUB_OUTPUT.
-          # We use a unique name to avoid conflicts: JOB_ECR_URI
-          echo "JOB_ECR_URI=$IMAGE_URI_SHA" >> $GITHUB_OUTPUT
+          # Set output for next steps
+          echo "image_uri=$IMAGE_URI_SHA" >> $GITHUB_OUTPUT
+          
+          # Also print for debugging
+          echo "Image URI: $IMAGE_URI_SHA"
 
-
-      # NEW STEP: Convert Step Output into a Job Environment Variable
-      # This is the safest way to ensure the CloudFormation action picks it up.
-      - name: Expose ECR URI to Job Environment
-        run: |
-          echo "ECR_FULL_URI=${{ steps.push-image.outputs.JOB_ECR_URI }}" >> $GITHUB_ENV
-        
       - name: Déploiement de la mise à jour de la Stack CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
@@ -85,10 +80,10 @@ jobs:
           template: car-damage-inference-stack.yaml
           region: ${{ env.AWS_REGION }}
           capabilities: CAPABILITY_NAMED_IAM
-          parameter-overrides: |
-            VpcId=${{ env.VPC_ID }}
-            SubnetAId=${{ env.SubnetAId }}
-            SubnetBId=${{ env.SubnetBId }}
-            ContainerPort=${{ env.ContainerPort }}
-            # Reference the variable from the JOB environment (ECR_FULL_URI)
-            ECRImageTag=${{ env.ECR_FULL_URI }}
+          # FIXED: Reference the step output directly, not through env
+          parameter-overrides: >-
+            VpcId=${{ env.VPC_ID }},
+            SubnetAId=${{ env.SubnetAId }},
+            SubnetBId=${{ env.SubnetBId }},
+            ContainerPort=${{ env.ContainerPort }},
+            ECRImageTag=${{ steps.push-image.outputs.image_uri }}
