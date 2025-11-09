@@ -81,7 +81,7 @@ jobs:
           name: ${{ env.STACK_NAME }}
           template: car-damage-inference-stack.yaml
           capabilities: CAPABILITY_NAMED_IAM
-          # FIXED: Match the existing stack parameter names (VPCID, PublicSubnet1, PublicSubnet2)
+          # Ajustement de l'indentation pour assurer la bonne transmission de l'ECRImageTag
           parameter-overrides: >-
             VPCID=${{ env.VPC_ID }},
             PublicSubnet1=${{ env.SubnetAId }},
