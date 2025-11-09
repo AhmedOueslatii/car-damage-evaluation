@@ -78,8 +78,6 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: CarDamageInferenceTask
-      # Fix: Augmented resources. 256/512 is often too low for ML/Python apps, 
-      # leading to slow startup and health check failure.
       Cpu: 1024 # Increased to 1 vCPU
       Memory: 2048 # Increased to 2 GB
       NetworkMode: awsvpc
@@ -135,7 +133,7 @@ Resources:
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
-  # 8. Target Group - HEALTH CHECK IMPROVED
+  # 8. Target Group - HEALTH CHECK IMPROVED (Étape 1)
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -144,12 +142,11 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /health
-      # Fix: Increased health check timeout to allow for longer container startup 
-      # (e.g., loading model from S3).
-      HealthCheckTimeoutSeconds: 10 # Changed from 5 to 10
-      HealthCheckIntervalSeconds: 30
+      # Ajustements pour plus de tolérance au démarrage :
+      HealthCheckTimeoutSeconds: 15 # Augmenté à 15s (de 10s)
+      HealthCheckIntervalSeconds: 60 # Augmenté à 60s (de 30s)
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5 # Augmenté à 5 (de 2) pour plus de tentatives avant l'échec
 
   # 9. Listener
   Listener:
@@ -172,10 +169,12 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       DesiredCount: 1
-      HealthCheckGracePeriodSeconds: 300
+      # Période de grâce étendue pour le Health Check (Étape 2)
+      HealthCheckGracePeriodSeconds: 600 # 10 minutes (au lieu de 300s/5 min)
       DeploymentConfiguration:
         MaximumPercent: 200
-        MinimumHealthyPercent: 0
+        # Permettre au service de passer en production même si seulement la moitié des tâches sont saines
+        MinimumHealthyPercent: 50 
         DeploymentCircuitBreaker:
           Enable: true
           Rollback: true
