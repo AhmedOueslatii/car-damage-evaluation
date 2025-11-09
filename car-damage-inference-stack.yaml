@@ -7,26 +7,26 @@ Description: |
 # PARAMETERS: Must match the existing stack parameter names
 # ------------------------------------------------------------------
 Parameters:
-  VPCID: 
+  VPCID:  # Changed from VpcId to match existing stack
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
     Default: vpc-095f1ea82ca7a98f7
 
-  PublicSubnet1: 
+  PublicSubnet1:  # Changed from SubnetAId to match existing stack
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
     Default: subnet-0c1ea539005746ae3
 
-  PublicSubnet2: 
+  PublicSubnet2:  # Changed from SubnetBId to match existing stack
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
     Default: subnet-0021824dd966cb43f
     
-  ECRImageTag: 
+  ECRImageTag:  # This is new, so it's fine
     Type: String
     Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
-  ContainerPort: 
+  ContainerPort:  # This exists in the old stack, keep the name
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
@@ -60,28 +60,14 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
         - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
-      Policies:
-        - PolicyName: S3ModelAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 's3:GetObject'
-                  - 's3:ListBucket'
-                Resource:
-                  - 'arn:aws:s3:::car-damage-3051-models'
-                  - 'arn:aws:s3:::car-damage-3051-models/*'
 
-  # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
+  # 4. Task Definition (Fargate)
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: CarDamageInferenceTask
-      # Fix: Augmented resources. 256/512 is often too low for ML/Python apps, 
-      # leading to slow startup and health check failure.
-      Cpu: 1024 # Increased to 1 vCPU
-      Memory: 2048 # Increased to 2 GB
+      Cpu: 256
+      Memory: 512
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -104,7 +90,7 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VPCID 
+      VpcId: !Ref VPCID  # Changed reference
       GroupDescription: Security Group for ALB (Public HTTP)
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -116,7 +102,7 @@ Resources:
   FargateSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VPCID 
+      VpcId: !Ref VPCID  # Changed reference
       GroupDescription: Security Group for Fargate Tasks (Internal access from ALB)
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -130,24 +116,22 @@ Resources:
     Properties:
       Scheme: internet-facing
       Subnets:
-        - !Ref PublicSubnet1 
-        - !Ref PublicSubnet2 
+        - !Ref PublicSubnet1  # Changed reference
+        - !Ref PublicSubnet2  # Changed reference
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
-  # 8. Target Group - HEALTH CHECK IMPROVED
+  # 8. Target Group
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      VpcId: !Ref VPCID 
+      VpcId: !Ref VPCID  # Changed reference
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
-      # Fix: Increased health check timeout to allow for longer container startup 
-      # (e.g., loading model from S3).
-      HealthCheckTimeoutSeconds: 10 # Changed from 5 to 10
       HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 2
 
@@ -172,18 +156,14 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       DesiredCount: 1
-      HealthCheckGracePeriodSeconds: 300
       DeploymentConfiguration:
         MaximumPercent: 200
-        MinimumHealthyPercent: 0
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
+        MinimumHealthyPercent: 100
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !Ref PublicSubnet1 
-            - !Ref PublicSubnet2 
+            - !Ref PublicSubnet1  # Changed reference
+            - !Ref PublicSubnet2  # Changed reference
           SecurityGroups:
             - !Ref FargateSecurityGroup
           AssignPublicIp: ENABLED
