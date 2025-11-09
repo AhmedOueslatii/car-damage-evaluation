@@ -7,26 +7,26 @@ Description: |
 # PARAMETERS: Must match the existing stack parameter names
 # ------------------------------------------------------------------
 Parameters:
-  VPCID:  # Changed from VpcId to match existing stack
+  VPCID: 
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
     Default: vpc-095f1ea82ca7a98f7
 
-  PublicSubnet1:  # Changed from SubnetAId to match existing stack
+  PublicSubnet1: 
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
     Default: subnet-0c1ea539005746ae3
 
-  PublicSubnet2:  # Changed from SubnetBId to match existing stack
+  PublicSubnet2: 
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
     Default: subnet-0021824dd966cb43f
     
-  ECRImageTag:  # This is new, so it's fine
+  ECRImageTag: 
     Type: String
     Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
-  ContainerPort:  # This exists in the old stack, keep the name
+  ContainerPort: 
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
@@ -73,13 +73,15 @@ Resources:
                   - 'arn:aws:s3:::car-damage-3051-models'
                   - 'arn:aws:s3:::car-damage-3051-models/*'
 
-  # 4. Task Definition (Fargate)
+  # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: CarDamageInferenceTask
-      Cpu: 256
-      Memory: 512
+      # Fix: Augmented resources. 256/512 is often too low for ML/Python apps, 
+      # leading to slow startup and health check failure.
+      Cpu: 1024 # Increased to 1 vCPU
+      Memory: 2048 # Increased to 2 GB
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -102,7 +104,7 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VPCID  # Changed reference
+      VpcId: !Ref VPCID 
       GroupDescription: Security Group for ALB (Public HTTP)
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -114,7 +116,7 @@ Resources:
   FargateSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref VPCID  # Changed reference
+      VpcId: !Ref VPCID 
       GroupDescription: Security Group for Fargate Tasks (Internal access from ALB)
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -128,22 +130,24 @@ Resources:
     Properties:
       Scheme: internet-facing
       Subnets:
-        - !Ref PublicSubnet1  # Changed reference
-        - !Ref PublicSubnet2  # Changed reference
+        - !Ref PublicSubnet1 
+        - !Ref PublicSubnet2 
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
-  # 8. Target Group
+  # 8. Target Group - HEALTH CHECK IMPROVED
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      VpcId: !Ref VPCID  # Changed reference
+      VpcId: !Ref VPCID 
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
+      # Fix: Increased health check timeout to allow for longer container startup 
+      # (e.g., loading model from S3).
+      HealthCheckTimeoutSeconds: 10 # Changed from 5 to 10
       HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 2
 
@@ -178,8 +182,8 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !Ref PublicSubnet1  # Changed reference
-            - !Ref PublicSubnet2  # Changed reference
+            - !Ref PublicSubnet1 
+            - !Ref PublicSubnet2 
           SecurityGroups:
             - !Ref FargateSecurityGroup
           AssignPublicIp: ENABLED
