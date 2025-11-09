@@ -143,7 +143,7 @@ Resources:
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
-      HealthCheckPath: /
+      HealthCheckPath: /health
       # Fix: Increased health check timeout to allow for longer container startup 
       # (e.g., loading model from S3).
       HealthCheckTimeoutSeconds: 10 # Changed from 5 to 10
