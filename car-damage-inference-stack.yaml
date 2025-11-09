@@ -73,6 +73,29 @@ Resources:
                   - 'arn:aws:s3:::car-damage-3051-models'
                   - 'arn:aws:s3:::car-damage-3051-models/*'
 
+  # 3.5 NOUVEAU RÔLE : Task Role (Pour les permissions de l'application, ex: DynamoDB)
+  # CECI DOIT ÊTRE AJOUTÉ POUR L'ACCÈS DYNAMODB
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem # Permission pour écrire dans DynamoDB
+                # Vous devez avoir une table DynamoDB nommée 'DynamoDBTable' pour que !GetAtt fonctionne
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/CarDamageInferenceResults' # Mettre le nom exact de votre table
+
   # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -84,7 +107,7 @@ Resources:
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn 
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn  # <-- CHANGEMENT : Utilise maintenant le nouveau ECSTaskRole
       ContainerDefinitions:
         - Name: car-damage-inference-container
           Image: !Ref ECRImageTag
