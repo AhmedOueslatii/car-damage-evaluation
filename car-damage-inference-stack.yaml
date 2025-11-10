@@ -70,10 +70,24 @@ Resources:
                   - 's3:GetObject'
                   - 's3:ListBucket'
                 Resource:
+                  # Correction S3 (pour l'erreur 403 précédente)
                   - 'arn:aws:s3:::car-damage-3051-models'
                   - 'arn:aws:s3:::car-damage-3051-models/*'
-                  # CORRECTION: Ajout explicite du chemin du fichier pour garantir la permission
                   - 'arn:aws:s3:::car-damage-3051-models/artifacts/yolov11/best.pt'
+        
+        # Correction DynamoDB: Pointez vers la table car-assessments
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                Resource: 
+                  # Utilisation du nom de table vérifié dans la console : car-assessments
+                  !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/car-assessments'
+
 
   # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
   TaskDefinition:
