@@ -7,26 +7,26 @@ Description: |
 # PARAMETERS: Must match the existing stack parameter names
 # ------------------------------------------------------------------
 Parameters:
-  VPCID: 
+  VPCID:  
     Type: String
     Description: L'ID du VPC existant où Fargate sera déployé.
     Default: vpc-095f1ea82ca7a98f7
 
-  PublicSubnet1: 
+  PublicSubnet1:  
     Type: String
     Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
     Default: subnet-0c1ea539005746ae3
 
-  PublicSubnet2: 
+  PublicSubnet2:  
     Type: String
     Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
     Default: subnet-0021824dd966cb43f
     
-  ECRImageTag: 
+  ECRImageTag:  
     Type: String
     Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
     
-  ContainerPort: 
+  ContainerPort:  
     Type: Number
     Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
@@ -89,15 +89,13 @@ Resources:
                   !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/car-assessments'
 
 
-  # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
+  # 4. Task Definition (Fargate) - CORRECTION DYNAMODB APPLIQUÉE ICI
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: CarDamageInferenceTask
-      # Fix: Augmented resources. 256/512 is often too low for ML/Python apps, 
-      # leading to slow startup and health check failure.
-      Cpu: 1024 # Increased to 1 vCPU
-      Memory: 2048 # Increased to 2 GB
+      Cpu: 1024
+      Memory: 2048
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -115,6 +113,15 @@ Resources:
               awslogs-group: !Ref CloudWatchLogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: ecs
+          # ==========================================================
+          # AJOUT CRITIQUE POUR LA CORRECTION DE L'ERREUR DYNAMODB
+          # Le code Flask utilise la variable DYNAMODB_TABLE_NAME
+          # ==========================================================
+          Environment:
+            - Name: DYNAMODB_TABLE_NAME
+              Value: car-assessments # <-- Le nom de la NOUVELLE table
+          # ==========================================================
+          
 
   # 5. Security Group for ALB (Allows public HTTP access)
   ALBSecurityGroup:
