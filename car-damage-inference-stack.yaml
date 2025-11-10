@@ -1,171 +1,94 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: YOLOV11 Car Damage Inference API deployed on AWS ECS Fargate.
+Description: |
+  Déploiement d'une application de Car Damage Inference sur AWS Fargate.
+  Utilise un VPC existant et déploie un Service ECS avec un ALB public.
 
+# ------------------------------------------------------------------
+# PARAMETERS: Must match the existing stack parameter names
+# ------------------------------------------------------------------
 Parameters:
-  VPCID:
+  VPCID: 
     Type: String
-    Description: ID of the VPC where the resources will be deployed.
-  PublicSubnet1:
+    Description: L'ID du VPC existant où Fargate sera déployé.
+    Default: vpc-095f1ea82ca7a98f7
+
+  PublicSubnet1: 
     Type: String
-    Description: First public subnet ID for the load balancer.
-  PublicSubnet2:
+    Description: L'ID du premier sous-réseau public (a) pour le ALB et Fargate.
+    Default: subnet-0c1ea539005746ae3
+
+  PublicSubnet2: 
     Type: String
-    Description: Second public subnet ID for the load balancer.
-  PrivateSubnet1:
+    Description: L'ID du second sous-réseau public (b) pour la haute disponibilité.
+    Default: subnet-0021824dd966cb43f
+    
+  ECRImageTag: 
     Type: String
-    Description: First private subnet ID for the Fargate tasks.
-  PrivateSubnet2:
-    Type: String
-    Description: Second private subnet ID for the Fargate tasks.
-  ContainerPort:
+    Description: Le full URI de l'image Docker à déployer depuis ECR (e.g., 123.dkr.ecr.region.com/repo:sha).
+    
+  ContainerPort: 
     Type: Number
+    Description: Le port d'écoute de l'application conteneurisée.
     Default: 8080
-    Description: Port on which the container listens for traffic.
-  ECRImageTag:
-    Type: String
-    Description: Full URI/Tag of the ECR image to deploy (e.g., <account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>).
-  TableName:
-    Type: String
-    Description: Name of the DynamoDB table to store results.
 
+# ------------------------------------------------------------------
+# RESOURCES: Infrastructure Definition
+# ------------------------------------------------------------------
 Resources:
-
-# Partie 1. Cluster ECS et Log Group
+  # 1. ECS Cluster
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: CarDamageInferenceCluster
 
+  # 2. CloudWatch Log Group
   CloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/ecs/${AWS::StackName}'
+      LogGroupName: /ecs/CarDamageInference
       RetentionInDays: 7
 
-# Partie 2. Rôles IAM
+  # 3. IAM Roles (Execution Role for ECS)
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
+            Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-  ECSTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
       Policies:
-        - PolicyName: DynamoDBAccessPolicy
+        - PolicyName: S3ModelAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - dynamodb:PutItem
-                  - dynamodb:GetItem
-                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}'
-        
-        # NOUVEAU : Correction de l'erreur 403 - Ajout de la permission de lecture S3
-        - PolicyName: S3ModelReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  # Autorise la lecture (GetObject) qui inclut l'opération HeadObject
-                  - s3:GetObject
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
                 Resource:
-                  # Chemin du modèle S3 qui causait l'erreur 403.
-                  # ATTENTION : Si le nom de votre bucket est différent de 'car-damage-3051-models', vous devez le changer ici.
-                  - arn:aws:s3:::car-damage-3051-models/artifacts/yolov11/best.pt
-                  # L'accès au bucket racine est souvent nécessaire pour les opérations connexes
-                  - arn:aws:s3:::car-damage-3051-models
+                  - 'arn:aws:s3:::car-damage-3051-models'
+                  - 'arn:aws:s3:::car-damage-3051-models/*'
+                  # CORRECTION: Ajout explicite du chemin du fichier pour garantir la permission
+                  - 'arn:aws:s3:::car-damage-3051-models/artifacts/yolov11/best.pt'
 
-# Partie 3. Sécurité (Security Groups)
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: !Sub '${AWS::StackName}-ALB-SecurityGroup'
-      GroupDescription: Security group for ALB (Allow traffic from the Internet)
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - CidrIp: 0.0.0.0/0
-          IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-
-  FargateSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: !Sub '${AWS::StackName}-Fargate-SecurityGroup'
-      GroupDescription: Security group for Fargate tasks (Allow traffic ONLY from the ALB)
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        # Autoriser le trafic entrant depuis le ALB sur le ContainerPort
-        - SourceSecurityGroupId: !Ref ALBSecurityGroup
-          IpProtocol: tcp
-          FromPort: !Ref ContainerPort
-          ToPort: !Ref ContainerPort
-
-# Partie 4. Load Balancer (ALB)
-  ALB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Scheme: internet-facing
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-
-  TargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      VpcId: !Ref VPCID
-      Port: !Ref ContainerPort # Écouter sur le port du conteneur
-      Protocol: HTTP
-      HealthCheckPath: /health # Chemin du health check
-      HealthCheckIntervalSeconds: 10
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
-
-  Listener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref ALB
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-
-# Partie 5. Définition de Tâche et Service ECS
+  # 4. Task Definition (Fargate) - RESOURCES AUGMENTED FOR ML WORKLOAD
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub '${AWS::StackName}-TaskDefinition'
-      Cpu: 512
-      Memory: 1024
+      Family: CarDamageInferenceTask
+      # Fix: Augmented resources. 256/512 is often too low for ML/Python apps, 
+      # leading to slow startup and health check failure.
+      Cpu: 1024 # Increased to 1 vCPU
+      Memory: 2048 # Increased to 2 GB
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn 
       ContainerDefinitions:
         - Name: car-damage-inference-container
           Image: !Ref ECRImageTag
@@ -176,37 +99,107 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref CloudWatchLogGroup
-              awslogs-region: !Ref AWS::Region
+              awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: ecs
 
+  # 5. Security Group for ALB (Allows public HTTP access)
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCID 
+      GroupDescription: Security Group for ALB (Public HTTP)
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        
+  # 6. Security Group for Fargate Tasks (Allows traffic ONLY from the ALB)
+  FargateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCID 
+      GroupDescription: Security Group for Fargate Tasks (Internal access from ALB)
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  # 7. Application Load Balancer (ALB)
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1 
+        - !Ref PublicSubnet2 
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  # 8. Target Group - HEALTH CHECK IMPROVED
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPCID 
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health
+      # Fix: Increased health check timeout to allow for longer container startup 
+      # (e.g., loading model from S3).
+      HealthCheckTimeoutSeconds: 10 # Changed from 5 to 10
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  # 9. Listener
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # 10. ECS Service
   ECSService:
     Type: AWS::ECS::Service
+    DependsOn: Listener
     Properties:
-      ServiceName: !Sub '${AWS::StackName}-ECSService'
       Cluster: !Ref ECSCluster
+      ServiceName: CarDamageInferenceService
+      TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       DesiredCount: 1
-      TaskDefinition: !Ref TaskDefinition
+      HealthCheckGracePeriodSeconds: 300
       DeploymentConfiguration:
         MaximumPercent: 200
-        MinimumHealthyPercent: 100
+        MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
+            - !Ref PublicSubnet1 
+            - !Ref PublicSubnet2 
           SecurityGroups:
             - !Ref FargateSecurityGroup
+          AssignPublicIp: ENABLED
       LoadBalancers:
         - ContainerName: car-damage-inference-container
           ContainerPort: !Ref ContainerPort
           TargetGroupArn: !Ref TargetGroup
-
-# Partie 6. Sorties de la Stack
+          
+# ------------------------------------------------------------------
+# OUTPUTS
+# ------------------------------------------------------------------
 Outputs:
   ServiceURL:
-    Description: URL publique de l'application Fargate
-    Value: !Sub 'http://${ALB.DNSName}'
+    Description: L'URL publique de l'application Fargate
+    Value: !Sub "http://${ALB.DNSName}"
     Export:
       Name: CarDamageInferenceServiceURL
