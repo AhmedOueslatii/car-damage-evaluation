@@ -101,7 +101,8 @@ def inference_handler():
         if not image_base64:
              return jsonify({"error": "Missing 'image' (base64) field in request body."}), 400
              
-        image_id = data.get('image_id', str(uuid.uuid4()))
+        # Générer l'ID pour la clé primaire de DynamoDB
+        assessment_id = str(uuid.uuid4())
         
         # 1. Décoder l'image
         # Note: Le client JS devrait envoyer la partie pure base64 (sans 'data:image/...')
@@ -131,7 +132,8 @@ def inference_handler():
         
         table.put_item(
             Item={
-                'image_id': image_id,
+                # CHANGEMENT CLÉ : Utiliser "assessmentId" pour correspondre au schéma de la table
+                'assessmentId': assessment_id, 
                 'timestamp': str(datetime.datetime.now()),
                 # Stocker les résultats en string JSON pour éviter les problèmes de type
                 'results_json': json.dumps(detections) 
@@ -139,7 +141,7 @@ def inference_handler():
         )
         
         return jsonify({
-            "image_id": image_id,
+            "assessmentId": assessment_id, # Renvoyer le nouvel ID généré
             "status": "Inference Complete and Result Saved",
             "detection_count": len(detections),
             "detections": detections
